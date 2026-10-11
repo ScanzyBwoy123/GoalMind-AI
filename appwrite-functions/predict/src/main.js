@@ -112,7 +112,9 @@ export default async ({ req, res, log, error }) => {
       const result = await response.json();
       const rows = result.rows || [];
 
-      matches.push(...rows);
+            // Appwrite stores custom match fields inside each row's data object.
+      // Flatten the rows so the prediction engine can read the fields.
+      matches.push(...rows.map(row => ({ ...row, ...(row.data || {}) })));
 
       if (
         rows.length < pageSize ||
