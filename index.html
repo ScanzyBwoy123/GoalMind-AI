@@ -238,30 +238,239 @@
   </main>
   <script>
     const form = document.getElementById("matchForm");
-    const result = document.getElementById("result");
-    form.addEventListener("submit", function(event) {
-      event.preventDefault();
-      const home = document.getElementById("homeTeam").value.trim();
-      const away = document.getElementById("awayTeam").value.trim();
-      const date = document.getElementById("matchDate").value;
-      if (!home || !away) {
-        alert("Please enter both team names.");
-        return;
-      }
-      if (home.toLowerCase() === away.toLowerCase()) {
-        alert("Please enter two different teams.");
-        return;
-      }
-      result.replaceChildren();
-      result.hidden = false;
-      const heading = document.createElement("strong");
-      heading.textContent = home + " vs " + away;
-      const message = document.createElement("p");
-      message.textContent =
-        (date ? "Match date: " + date + ". " : "") +
-        "Your match has been prepared. The next step is to connect historical football data and our prediction engine.";
-      result.append(heading, message);
+const result = document.getElementById("result");
+const submitButton = form.querySelector('button[type="submit"]');
+
+const APPWRITE_PROJECT_ID = "6acba55b002fe04944f0";
+const FUNCTION_ID = "goalmind-predict";
+
+function addText(parent, tag, text, className = "") {
+  const element = document.createElement(tag);
+  element.textContent = text;
+
+  if (className) {
+    element.className = className;
+  }
+
+  parent.appendChild(element);
+  return element;
+}
+
+function formatPercent(value) {
+  return `${(Number(value) * 100).toFixed(1)}%`;
+}
+
+function displayPrediction(prediction) {
+  result.replaceChildren();
+
+  addText(
+    result,
+    "h3",
+    `${prediction.home_team} vs ${prediction.away_team}`
+  );
+
+  addText(
+    result,
+    "p",
+    `Competition: ${prediction.league}`
+  );
+
+  addText(
+    result,
+    "p",
+    `Predicted score: ${prediction.predicted_score}`
+  );
+
+  addText(
+    result,
+    "p",
+    `Expected goals: ${prediction.predicted_home_goals} - ${prediction.predicted_away_goals}`
+  );
+
+  addText(result, "h4", "Match Outcome Probabilities");
+
+  const outcomes = document.createElement("ul");
+
+  addText(
+    outcomes,
+    "li",
+    `Home win: ${formatPercent(prediction.home_win_prob)}`
+  );
+
+  addText(
+    outcomes,
+    "li",
+    `Draw: ${formatPercent(prediction.draw_prob)}`
+  );
+
+  addText(
+    outcomes,
+    "li",
+    `Away win: ${formatPercent(prediction.away_win_prob)}`
+  );
+
+  result.appendChild(outcomes);
+
+  addText(result, "h4", "Goals Analysis");
+
+  const goals = document.createElement("ul");
+
+  addText(
+    goals,
+    "li",
+    `Over 2.5 goals: ${formatPercent(prediction.over25_prob)}`
+  );
+
+  addText(
+    goals,
+    "li",
+    `Both teams to score: ${formatPercent(prediction.btts_prob)}`
+  );
+
+  result.appendChild(goals);
+
+  if (Array.isArray(prediction.top_scores)) {
+    addText(result, "h4", "Most Likely Scorelines");
+
+    const scores = document.createElement("ul");
+
+    prediction.top_scores.forEach(item => {
+      addText(
+        scores,
+        "li",
+        `${item.score} — ${item.probability}%`
+      );
     });
+
+    result.appendChild(scores);
+  }
+
+  addText(
+    result,
+    "p",
+    `Historical matches analyzed: ${prediction.history_matches_used}`
+  );
+
+  addText(
+    result,
+    "p",
+    "Important: These are experimental statistical estimates, not guaranteed outcomes."
+  );
+
+  addText(
+    result,
+    "p",
+    "Data limitation: The current historical dataset covers EPL seasons from 2015–16 through 2024–25. It does not include newer seasons or current team news."
+  );
+
+  result.hidden = false;
+}
+
+form.addEventListener("submit", async function(event) {
+  event.preventDefault();
+
+  const home = document.getElementById("homeTeam").value.trim();
+  const away = document.getElementById("awayTeam").value.trim();
+  const date = document.getElementById("matchDate").value;
+
+  if (!home || !away) {
+    alert("Please enter both team names.");
+    return;
+  }
+
+  if (home.toLowerCase() === away.toLowerCase()) {
+    alert("Please enter two different teams.");
+    return;
+  }
+
+  const payload = {
+    league: "English Premier League",
+    home_team: home,
+    away_team: away,
+    match_date: date
+      ? `${date}T12:00:00.000Z`
+      : new Date().toISOString()
+  };
+
+  result.replaceChildren();
+  result.hidden = false;
+
+  addText(result, "p", "Analyzing historical football data. Please wait...");
+
+  submitButton.disabled = true;
+  submitButton.textContent = "Analyzing...";
+
+  try {
+    const response = await fetch(
+      `https://cloud.appwrite.io/v1/functions/${FUNCTION_ID}/executions`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Appwrite-Project": APPWRITE_PROJECT_ID
+        },
+        body: JSON.stringify({
+          body: JSON.stringify(payload),
+          async: false,
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          }
+        })
+      }
+    );
+
+    const execution = await response.json();
+
+    if (!response.ok) {
+      throw new Error(
+        execution.message || "Unable to contact the prediction service."
+      );
+    }
+
+    if (!execution.responseBody) {
+      throw new Error(
+        "The prediction service did not return a result. Please try again."
+      );
+    }
+
+    let prediction;
+
+    try {
+      prediction = JSON.parse(execution.responseBody);
+    } catch {
+      throw new Error("The prediction service returned an invalid response.");
+    }
+
+    if (
+      execution.responseStatusCode >= 400 ||
+      prediction.error
+    ) {
+      throw new Error(
+        prediction.error || "The prediction could not be completed."
+      );
+    }
+
+    displayPrediction(prediction);
+
+  } catch (error) {
+    result.replaceChildren();
+
+    addText(result, "strong", "Prediction unavailable");
+
+    addText(
+      result,
+      "p",
+      error.message || "Something went wrong. Please try again."
+    );
+
+    result.hidden = false;
+
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = "Prepare Match →";
+  }
+});
   </script>
 </body>
 </html>
