@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0b1220">
+  <title>GoalMind AI | Football Intelligence</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #0b1220;
+      color: #f1f5f9;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px;
+      background: #111c2e;
+      border-bottom: 1px solid #263750;
+    }
+    .logo {
+      font-size: 21px;
+      font-weight: bold;
+    }
+    .logo span {
+      color: #73e0b0;
+    }
+    .status {
+      font-size: 12px;
+      color: #73e0b0;
+    }
+    main {
+      width: 90%;
+      max-width: 900px;
+      margin: auto;
+    }
+    .hero {
+      padding: 55px 0 35px;
+    }
+    .eyebrow {
+      color: #73e0b0;
+      font-size: 12px;
+      font-weight: bold;
+      letter-spacing: 2px;
+    }
+    h1 {
+      font-size: clamp(38px, 8vw, 64px);
+      line-height: 1.1;
+      margin: 15px 0;
+    }
+    h1 span {
+      color: #73e0b0;
+    }
+    .description {
+      color: #a5b4c8;
+      line-height: 1.8;
+      max-width: 600px;
+    }
+    .panel {
+      background: #111c2e;
+      border: 1px solid #263750;
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 25px;
+    }
+    h2 {
+      margin-top: 0;
+    }
+    label {
+      display: block;
+      margin: 18px 0 8px;
+      font-size: 14px;
+    }
+    input {
+      width: 100%;
+      padding: 14px;
+      border-radius: 8px;
+      border: 1px solid #30435e;
+      background: #0b1220;
+      color: white;
+      font-size: 16px;
+    }
+    button {
+      width: 100%;
+      padding: 15px;
+      margin-top: 20px;
+      border: none;
+      border-radius: 8px;
+      background: #73e0b0;
+      color: #092017;
+      font-size: 15px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    button:active {
+      opacity: 0.8;
+    }
+    #result {
+      margin-top: 20px;
+      padding: 15px;
+      background: #0b1220;
+      border-radius: 8px;
+      line-height: 1.7;
+      overflow-wrap: anywhere;
+    }
+    .features {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 15px;
+      margin: 25px 0;
+    }
+    .feature {
+      padding: 20px;
+      background: #111c2e;
+      border: 1px solid #263750;
+      border-radius: 12px;
+    }
+    .feature h3 {
+      color: #73e0b0;
+    }
+    .feature p {
+      color: #a5b4c8;
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    .notice {
+      color: #f6d89b;
+      font-size: 12px;
+      line-height: 1.7;
+      margin-top: 18px;
+    }
+    footer {
+      margin-top: 45px;
+      padding: 25px 0;
+      border-top: 1px solid #263750;
+      color: #a5b4c8;
+      font-size: 12px;
+      line-height: 1.8;
+    }
+    @media (max-width: 600px) {
+      .features {
+        grid-template-columns: 1fr;
+      }
+      header {
+        padding: 16px;
+      }
+      .hero {
+        padding-top: 40px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">GoalMind <span>AI</span></div>
+    <div class="status">● Early Development</div>
+  </header>
+  <main>
+    <section class="hero">
+      <p class="eyebrow">FOOTBALL INTELLIGENCE</p>
+      <h1>
+        Understand the game.<br>
+        <span>Learn from the data.</span>
+      </h1>
+      <p class="description">
+        GoalMind AI is being developed to analyze football statistics,
+        historical results, team performance and match data to estimate
+        possible football outcomes.
+      </p>
+    </section>
+    <section class="panel">
+      <h2>⚽ Match Analysis</h2>
+      <p class="description">
+        Enter two teams to prepare a match for analysis.
+      </p>
+      <form id="matchForm">
+        <label for="homeTeam">Home Team</label>
+        <input
+          id="homeTeam"
+          type="text"
+          placeholder="e.g. Arsenal"
+          maxlength="60"
+          required
+        >
+        <label for="awayTeam">Away Team</label>
+        <input
+          id="awayTeam"
+          type="text"
+          placeholder="e.g. Chelsea"
+          maxlength="60"
+          required
+        >
+        <label for="matchDate">Match Date (optional)</label>
+        <input id="matchDate" type="date">
+        <button type="submit">Prepare Match →</button>
+      </form>
+      <div id="result" hidden aria-live="polite"></div>
+      <p class="notice">
+        Important: Real AI predictions are not available yet.
+        We will connect historical football data and develop and test
+        a prediction model before presenting actual probabilities.
+        Predictions are estimates, never guarantees.
+      </p>
+    </section>
+    <section class="features">
+      <article class="feature">
+        <h3>01. Match Outcomes</h3>
+        <p>
+          Planned estimates for home wins, draws and away wins,
+          supported by historical match data.
+        </p>
+      </article>
+      <article class="feature">
+        <h3>02. Goals Analysis</h3>
+        <p>
+          Planned analysis of goal totals, over/under markets
+          and both teams to score.
+        </p>
+      </article>
+      <article class="feature">
+        <h3>03. Team Performance</h3>
+        <p>
+          Planned analysis of recent form, goals scored,
+          goals conceded and home/away performance.
+        </p>
+      </article>
+    </section>
+    <footer>
+      <strong>GoalMind AI</strong><br>
+      Football analytics and machine learning project.<br>
+      Predictions are statistical estimates, not guaranteed results.
+    </footer>
+  </main>
+  <script>
+    const form = document.getElementById("matchForm");
+    const result = document.getElementById("result");
+    form.addEventListener("submit", function(event) {
+      event.preventDefault();
+      const home = document.getElementById("homeTeam").value.trim();
+      const away = document.getElementById("awayTeam").value.trim();
+      const date = document.getElementById("matchDate").value;
+      if (!home || !away) {
+        alert("Please enter both team names.");
+        return;
+      }
+      if (home.toLowerCase() === away.toLowerCase()) {
+        alert("Please enter two different teams.");
+        return;
+      }
+      result.replaceChildren();
+      result.hidden = false;
+      const heading = document.createElement("strong");
+      heading.textContent = home + " vs " + away;
+      const message = document.createElement("p");
+      message.textContent =
+        (date ? "Match date: " + date + ". " : "") +
+        "Your match has been prepared. The next step is to connect historical football data and our prediction engine.";
+      result.append(heading, message);
+    });
+  </script>
+</body>
+</html>
