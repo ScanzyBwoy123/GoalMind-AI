@@ -98,8 +98,9 @@ export default async ({ req, res, log, error }) => {
         `/tables/${encodeURIComponent(matchesTableId)}/rows`
       );
 
-      url.searchParams.set("limit", String(pageSize));
-      url.searchParams.set("offset", String(offset));
+      // Appwrite TablesDB pagination
+url.searchParams.append("queries[]", `limit(${pageSize})`);
+url.searchParams.append("queries[]", `offset(${offset})`);
 
       const response = await fetch(url, { headers });
 
