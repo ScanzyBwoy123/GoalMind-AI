@@ -99,9 +99,21 @@ export default async ({ req, res, log, error }) => {
       );
 
       // Appwrite TablesDB pagination
-url.searchParams.append("queries[]", `limit(${pageSize})`);
-url.searchParams.append("queries[]", `offset(${offset})`);
+url.searchParams.append(
+  "queries[]",
+  JSON.stringify({
+    method: "limit",
+    values: [pageSize]
+  })
+);
 
+url.searchParams.append(
+  "queries[]",
+  JSON.stringify({
+    method: "offset",
+    values: [offset]
+  })
+);
       const response = await fetch(url, { headers });
 
       if (!response.ok) {
