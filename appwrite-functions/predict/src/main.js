@@ -248,6 +248,10 @@ export default async ({ req, res, log, error }) => {
       matchDate,
       0
     );
+    const homeNeedsFallback = homeHistory.length === 0;
+const awayNeedsFallback = awayHistory.length === 0;
+const usedLeagueAverageFallback =
+  homeNeedsFallback || awayNeedsFallback;
     const homeStats = teamStatistics(
       homeTeam,
       homeHistory,
@@ -346,6 +350,9 @@ export default async ({ req, res, log, error }) => {
       predicted_score: topScores[0].score,
       top_scores: topScores,
       history_matches_used: history.length,
+      home_team_used_fallback: homeNeedsFallback,
+away_team_used_fallback: awayNeedsFallback,
+used_league_average_fallback: usedLeagueAverageFallback,
       model_version: "goalmind-poisson-0.2-time-decay",
       note:
         "Experimental statistical estimates. " +
