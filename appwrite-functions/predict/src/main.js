@@ -336,7 +336,7 @@ export default async ({ req, res, log, error }) => {
           (item.probability * 100).toFixed(1)
         )
       }));
-    const prediction = {
+        const prediction = {
       match_date: matchDate.toISOString(),
       league,
       home_team: homeTeam,
@@ -350,11 +350,10 @@ export default async ({ req, res, log, error }) => {
       predicted_away_goals: Number(expectedAway.toFixed(2)),
       predicted_score: topScores[0].score,
       top_scores: topScores,
-        history_matches_used: history.length,
+      history_matches_used: history.length,
       home_team_used_fallback: homeNeedsFallback,
       away_team_used_fallback: awayNeedsFallback,
       used_league_average_fallback: usedLeagueAverageFallback,
-      model_version: "goalmind-poisson-0.2-time-decay",
       model_version: "goalmind-poisson-0.2-time-decay",
       note:
         "Experimental statistical estimates. " +
