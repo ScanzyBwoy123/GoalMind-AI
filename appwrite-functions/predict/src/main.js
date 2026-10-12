@@ -381,9 +381,18 @@ export default async ({ req, res, log, error }) => {
           predicted_home_goals:
             prediction.predicted_home_goals,
           predicted_away_goals:
-            prediction.predicted_away_goals,
-          predicted_score: prediction.predicted_score,
-          model_version: prediction.model_version,
+  prediction.predicted_away_goals,
+predicted_score: prediction.predicted_score,
+
+// Save fallback information for future model evaluation.
+home_team_used_fallback:
+  prediction.home_team_used_fallback,
+away_team_used_fallback:
+  prediction.away_team_used_fallback,
+used_league_average_fallback:
+  prediction.used_league_average_fallback,
+
+model_version: prediction.model_version,
           created_at: new Date().toISOString()
         }
       })
