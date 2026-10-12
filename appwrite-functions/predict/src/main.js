@@ -248,7 +248,7 @@ export default async ({ req, res, log, error }) => {
       matchDate,
       0
     );
-            const homeNeedsFallback = homeHistory.length === 0;
+    const homeNeedsFallback = homeHistory.length === 0;
     const awayNeedsFallback = awayHistory.length === 0;
     const usedLeagueAverageFallback =
       homeNeedsFallback || awayNeedsFallback;
@@ -336,7 +336,7 @@ export default async ({ req, res, log, error }) => {
           (item.probability * 100).toFixed(1)
         )
       }));
-            const prediction = {
+      const prediction = {
       match_date: matchDate.toISOString(),
       league,
       home_team: homeTeam,
