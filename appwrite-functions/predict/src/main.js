@@ -233,16 +233,7 @@ export default async ({ req, res, log, error }) => {
       sameTeam(match.home_team, awayTeam) ||
       sameTeam(match.away_team, awayTeam)
     );
-    if (!homeHistory.length || !awayHistory.length) {
-      return res.json({
-        error:
-          "One or both teams were not found in the historical data.",
-        home_team: homeTeam,
-        away_team: awayTeam,
-        league
-      }, 422);
-    }
-    // League scoring averages also give more importance to recent games.
+       // League scoring averages also give more importance to recent games.
     const avgHome = average(
       history,
       match => match.home_goals,
