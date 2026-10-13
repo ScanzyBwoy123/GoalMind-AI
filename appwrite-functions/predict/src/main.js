@@ -48,14 +48,42 @@ export default async ({ req, res, log, error }) => {
     "X-Appwrite-Key": apiKey,
     "Content-Type": "application/json"
   };
-  const normalize = name =>
+    const normalize = name =>
     String(name || "")
       .toLowerCase()
       .replace(/\b(fc|afc|cf|sc)\b/g, "")
       .replace(/[^a-z0-9]+/g, " ")
       .trim();
+  // Match alternative club names to historical dataset names.
+  const teamAliases = new Map([
+    ["nottingham forest", "nott m forest"],
+    ["nott m forest", "nott m forest"],
+    ["nott forest", "nott m forest"],
+    ["brighton hove albion", "brighton"],
+    ["brighton and hove albion", "brighton"],
+    ["luton town", "luton"],
+    ["ipswich town", "ipswich"],
+    ["manchester city", "man city"],
+    ["man city", "man city"],
+    ["manchester united", "man united"],
+    ["man united", "man united"],
+    ["wolverhampton wanderers", "wolves"],
+    ["tottenham hotspur", "tottenham"],
+    ["west bromwich albion", "west brom"],
+    ["newcastle united", "newcastle"],
+    ["leicester city", "leicester"],
+    ["norwich city", "norwich"],
+    ["cardiff city", "cardiff"],
+    ["swansea city", "swansea"],
+    ["stoke city", "stoke"],
+    ["hull city", "hull"]
+  ]);
+  const canonicalTeam = name => {
+    const normalizedName = normalize(name);
+    return teamAliases.get(normalizedName) || normalizedName;
+  };
   const sameTeam = (a, b) =>
-    normalize(a) === normalize(b);
+    canonicalTeam(a) === canonicalTeam(b);
   const factorial = n => {
     let result = 1;
     for (let i = 2; i <= n; i++) {
