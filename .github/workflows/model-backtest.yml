@@ -1,36 +1,44 @@
-name: GoalMind AI Model Backtest
-
+name: GoalMind AI Multi-Season Backtest
 on:
   push:
     branches:
       - goalmind-model-testing
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
   backtest:
-    name: Compare Poisson, Elo and Hybrid
+    name: Compare Models Across Seasons
     runs-on: ubuntu-latest
-
+    strategy:
+      fail-fast: false
+      matrix:
+        season:
+          - year: "2223"
+            label: "2022-23"
+          - year: "2324"
+            label: "2023-24"
+          - year: "2425"
+            label: "2024-25"
+          - year: "2526"
+            label: "2025-26"
     steps:
       - name: Check out testing branch
         uses: actions/checkout@v4
         with:
           ref: goalmind-model-testing
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-
       - name: Download historical football results
         run: |
           set -e
           curl --fail --location --retry 3 \
-            https://www.football-data.co.uk/mmz4281/2526/E0.csv \
-            --output premier-league-2025-26.csv
-
+            "https://www.football-data.co.uk/mmz4281/${{ matrix.season.year }}/E0.csv" \
+            --output "premier-league-${{ matrix.season.label }}.csv"
+          test -s "premier-league-${{ matrix.season.label }}.csv"
       - name: Run model backtest
-        run: node tools/model-backtest.js premier-league-2025-26.csv
+        run: |
+          node tools/model-backtest.js \
+            "premier-league-${{ matrix.season.label }}.csv"
