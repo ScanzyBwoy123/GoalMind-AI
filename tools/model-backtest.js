@@ -1,40 +1,31 @@
 "use strict";
+
 /**
- * GoalMind AI — Offline Model Backtesting Tool
+ * GoalMind AI — Multi-Season Model Backtesting
  *
  * Models:
  *   1. Poisson
  *   2. Elo
  *   3. Hybrid (Poisson + Elo)
  *
- * Input:
- *   A local JSON or CSV file containing historical match results.
+ * Usage:
+ *   node tools/model-backtest.js season.csv
  *
- * IMPORTANT:
- *   - No Appwrite connection.
- *   - No API keys required.
- *   - No changes to the live prediction function.
- *   - Uses chronological evaluation to avoid training on future results.
+ *   node tools/model-backtest.js season1.csv season2.csv season3.csv season4.csv
  *
- * Run:
- *   node tools/model-backtest.js matches.json
+ * Supported CSV columns:
+ *   Date,HomeTeam,AwayTeam,FTHG,FTAG
  *
- * Supported JSON format:
- * [
- *   {
- *     "date": "2025-01-10",
- *     "homeTeam": "Arsenal",
- *     "awayTeam": "Chelsea",
- *     "homeGoals": 2,
- *     "awayGoals": 1
- *   }
- * ]
+ * Also supports JSON arrays containing:
+ *   date, homeTeam, awayTeam, homeGoals, awayGoals
  *
- * Supported CSV headers:
- * date,homeTeam,awayTeam,homeGoals,awayGoals
+ * This is an offline testing tool. It does not connect to
+ * Appwrite or modify live predictions.
  */
+
 const fs = require("node:fs");
 const path = require("node:path");
+
 const CONFIG = {
   minimumTrainingMatches: 30,
   initialElo: 1500,
@@ -43,73 +34,73 @@ const CONFIG = {
   homeAdvantageGoals: 0.25,
   poissonMaximumGoals: 10,
   hybridEloWeight: 0.35,
-  hybridPoissonWeight: 0.65
+  hybridPoissonWeight: 0.65,
+  calibrationBins: 10
 };
+
+const OUTCOMES = ["H", "D", "A"];
+
 function fail(message) {
   console.error(`\nERROR: ${message}\n`);
   process.exitCode = 1;
 }
+
 function number(value) {
   if (value === "" || value === null || value === undefined) {
     return NaN;
   }
+
   return Number(value);
 }
+
 function normalizeDate(value) {
   const raw = String(value || "").trim();
 
-  // Supports Football-Data dates such as 19/10/26.
-  const ukDate = raw.match(
+  const match = raw.match(
     /^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/
   );
 
-  if (ukDate) {
-    const day = Number(ukDate[1]);
-    const month = Number(ukDate[2]);
-    let year = Number(ukDate[3]);
+  if (match) {
+    const day = Number(match[1]);
+    const month = Number(match[2]);
+    let year = Number(match[3]);
 
     if (year < 100) {
       year += year >= 50 ? 1900 : 2000;
     }
 
-    const parsed = new Date(Date.UTC(year, month - 1, day));
+    const date = new Date(Date.UTC(year, month - 1, day));
 
     if (
-      parsed.getUTCFullYear() !== year ||
-      parsed.getUTCMonth() !== month - 1 ||
-      parsed.getUTCDate() !== day
+      date.getUTCFullYear() !== year ||
+      date.getUTCMonth() !== month - 1 ||
+      date.getUTCDate() !== day
     ) {
       return null;
     }
 
-    return parsed.toISOString();
+    return date.toISOString().slice(0, 10);
   }
 
   const timestamp = Date.parse(raw);
 
   return Number.isFinite(timestamp)
-    ? new Date(timestamp).toISOString()
+    ? new Date(timestamp).toISOString().slice(0, 10)
     : null;
 }
 
 function normalizeMatch(row, index) {
-  const date =
-    row.date ||
-    row.match_date ||
-    row.matchDate ||
-    row.Date;
+  const date = normalizeDate(
+    row.date || row.match_date || row.matchDate || row.Date
+  );
 
-  const homeTeam =
-    row.homeTeam ||
-    row.home_team ||
-    row.home ||
-    row.HomeTeam;
+  const homeTeam = String(
+    row.homeTeam || row.home_team || row.home || row.HomeTeam || ""
+  ).trim();
 
-  const awayTeam =
-    row.awayTeam ||
-    row.away_team ||
-    row.away ||
-    row.AwayTeam;
+  const awayTeam = String(
+    row.awayTeam || row.away_team || row.away || row.AwayTeam || ""
+  ).trim();
 
   const homeGoals = number(
     row.homeGoals ??
@@ -125,11 +116,9 @@ function normalizeMatch(row, index) {
     row.FTAG
   );
 
-  const normalizedDate = normalizeDate(date);
-
-  if (!normalizedDate || !homeTeam || !awayTeam) {
+  if (!date || !homeTeam || !awayTeam) {
     throw new Error(
-      `Match ${index + 1} is missing a valid date or team name.`
+      `Match ${index + 1} has a missing date or team name.`
     );
   }
 
@@ -144,135 +133,168 @@ function normalizeMatch(row, index) {
     );
   }
 
-  if (
-    String(homeTeam).trim().toLowerCase() ===
-    String(awayTeam).trim().toLowerCase()
-  ) {
+  if (homeTeam.toLowerCase() === awayTeam.toLowerCase()) {
     throw new Error(
       `Match ${index + 1} has the same home and away team.`
     );
   }
 
   return {
-    date: normalizedDate,
-    homeTeam: String(homeTeam).trim(),
-    awayTeam: String(awayTeam).trim(),
+    date,
+    homeTeam,
+    awayTeam,
     homeGoals,
     awayGoals
   };
 }
-function parseCSV(text) {
-  const lines = text
+
+function parseCSVLine(line) {
+  const fields = [];
+  let field = "";
+  let quoted = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+
+    if (char === '"') {
+      if (quoted && line[i + 1] === '"') {
+        field += '"';
+        i++;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (char === "," && !quoted) {
+      fields.push(field.trim());
+      field = "";
+    } else {
+      field += char;
+    }
+  }
+
+  if (quoted) {
+    throw new Error("CSV contains an unclosed quotation mark.");
+  }
+
+  fields.push(field.trim());
+  return fields;
+}
+
+function parseCSV(content) {
+  const lines = content
     .replace(/^\uFEFF/, "")
     .split(/\r?\n/)
     .filter(line => line.trim() !== "");
+
   if (lines.length < 2) {
-    throw new Error("The CSV file contains no match rows.");
+    throw new Error("CSV contains no match rows.");
   }
-  function parseLine(line) {
-    const fields = [];
-    let field = "";
-    let quoted = false;
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      if (char === '"') {
-        if (quoted && line[i + 1] === '"') {
-          field += '"';
-          i++;
-        } else {
-          quoted = !quoted;
-        }
-      } else if (char === "," && !quoted) {
-        fields.push(field.trim());
-        field = "";
-      } else {
-        field += char;
-      }
-    }
-    if (quoted) {
-      throw new Error("CSV contains an unclosed quotation mark.");
-    }
-    fields.push(field.trim());
-    return fields;
-  }
-  const headers = parseLine(lines[0]).map(header =>
+
+  const headers = parseCSVLine(lines[0]).map(header =>
     header.replace(/^\uFEFF/, "").trim()
   );
+
   return lines.slice(1).map(line => {
-    const values = parseLine(line);
+    const values = parseCSVLine(line);
     const row = {};
+
     headers.forEach((header, index) => {
       row[header] = values[index] ?? "";
     });
+
     return row;
   });
 }
-function loadMatches(filePath) {
-  const resolved = path.resolve(filePath);
-  if (!fs.existsSync(resolved)) {
-    throw new Error(`Dataset not found: ${resolved}`);
-  }
-  const content = fs.readFileSync(resolved, "utf8");
-  let rows;
-  if (resolved.toLowerCase().endsWith(".csv")) {
-    rows = parseCSV(content);
-  } else if (resolved.toLowerCase().endsWith(".json")) {
-    rows = JSON.parse(content);
-    if (!Array.isArray(rows)) {
-      throw new Error("The JSON dataset must contain an array of matches.");
+
+function loadMatches(filePaths) {
+  const matches = [];
+
+  for (const filePath of filePaths) {
+    const resolved = path.resolve(filePath);
+
+    if (!fs.existsSync(resolved)) {
+      throw new Error(`Dataset not found: ${resolved}`);
     }
-  } else {
-    throw new Error("Dataset must be a .json or .csv file.");
-  }
-  const matches = rows.map(normalizeMatch);
-  matches.sort((a, b) =>
-    a.date.localeCompare(b.date)
-  );
-  for (let i = 1; i < matches.length; i++) {
-    if (matches[i].date < matches[i - 1].date) {
-      throw new Error("Dataset sorting failed.");
+
+    const content = fs.readFileSync(resolved, "utf8");
+    let rows;
+
+    if (resolved.toLowerCase().endsWith(".csv")) {
+      rows = parseCSV(content);
+    } else if (resolved.toLowerCase().endsWith(".json")) {
+      rows = JSON.parse(content);
+
+      if (!Array.isArray(rows)) {
+        throw new Error(
+          `JSON dataset must contain an array: ${resolved}`
+        );
+      }
+    } else {
+      throw new Error(
+        `Unsupported file: ${resolved}. Use CSV or JSON.`
+      );
     }
+
+    rows.forEach((row, index) => {
+      matches.push(normalizeMatch(row, index));
+    });
   }
+
+  matches.sort((a, b) => a.date.localeCompare(b.date));
+
   return matches;
 }
+
 function poissonProbability(goals, lambda) {
   if (lambda <= 0) {
     return goals === 0 ? 1 : 0;
   }
+
   let probability = Math.exp(-lambda);
+
   for (let i = 1; i <= goals; i++) {
     probability *= lambda / i;
   }
+
   return probability;
 }
-function poissonDistribution(lambda, maxGoals) {
+
+function poissonDistribution(lambda, maximumGoals) {
   const values = [];
-  for (let goals = 0; goals <= maxGoals; goals++) {
+
+  for (let goals = 0; goals <= maximumGoals; goals++) {
     values.push(poissonProbability(goals, lambda));
   }
-  // Include the small probability mass beyond maxGoals.
-  // Renormalization keeps the distribution usable for comparisons.
+
   const total = values.reduce((sum, value) => sum + value, 0);
+
   return values.map(value => value / total);
 }
-function expectedGoals(trainingMatches) {
+
+function expectedGoals(matches) {
+  if (matches.length === 0) {
+    return { home: 1.4, away: 1.1 };
+  }
+
   let homeGoals = 0;
   let awayGoals = 0;
-  for (const match of trainingMatches) {
+
+  for (const match of matches) {
     homeGoals += match.homeGoals;
     awayGoals += match.awayGoals;
   }
-  const count = trainingMatches.length || 1;
+
   return {
-    home: homeGoals / count,
-    away: awayGoals / count
+    home: homeGoals / matches.length,
+    away: awayGoals / matches.length
   };
 }
-function poissonPrediction(trainingMatches, target) {
-  const league = expectedGoals(trainingMatches);
+
+function poissonPrediction(matches, target) {
+  const league = expectedGoals(matches);
   const homeStats = {};
   const awayStats = {};
-  function getStats(store, team) {
+
+  function statsFor(store, team) {
     if (!store[team]) {
       store[team] = {
         goalsFor: 0,
@@ -280,53 +302,47 @@ function poissonPrediction(trainingMatches, target) {
         matches: 0
       };
     }
+
     return store[team];
   }
-  for (const match of trainingMatches) {
-    const home = getStats(homeStats, match.homeTeam);
+
+  for (const match of matches) {
+    const home = statsFor(homeStats, match.homeTeam);
+
     home.goalsFor += match.homeGoals;
     home.goalsAgainst += match.awayGoals;
     home.matches++;
-    const away = getStats(awayStats, match.awayTeam);
+
+    const away = statsFor(awayStats, match.awayTeam);
+
     away.goalsFor += match.awayGoals;
     away.goalsAgainst += match.homeGoals;
     away.matches++;
   }
+
   function rates(store, team, baseline) {
     const stats = store[team];
+
     if (!stats || stats.matches === 0) {
-      return {
-        attack: 1,
-        defense: 1
-      };
+      return { attack: 1, defense: 1 };
     }
-    const attack = stats.goalsFor / stats.matches;
-    const defense = stats.goalsAgainst / stats.matches;
+
     return {
-      attack: attack / Math.max(baseline, 0.1),
-      defense: defense / Math.max(baseline, 0.1)
+      attack:
+        (stats.goalsFor / stats.matches) /
+        Math.max(baseline, 0.1),
+
+      defense:
+        (stats.goalsAgainst / stats.matches) /
+        Math.max(baseline, 0.1)
     };
   }
-  const homeAttack = rates(
-    homeStats,
-    target.homeTeam,
-    league.home
-  );
-  const homeDefense = rates(
-    homeStats,
-    target.homeTeam,
-    league.away
-  );
-  const awayAttack = rates(
-    awayStats,
-    target.awayTeam,
-    league.away
-  );
-  const awayDefense = rates(
-    awayStats,
-    target.awayTeam,
-    league.home
-  );
+
+  const homeAttack = rates(homeStats, target.homeTeam, league.home);
+  const homeDefense = rates(homeStats, target.homeTeam, league.away);
+  const awayAttack = rates(awayStats, target.awayTeam, league.away);
+  const awayDefense = rates(awayStats, target.awayTeam, league.home);
+
   const homeLambda = Math.max(
     0.1,
     league.home *
@@ -334,263 +350,315 @@ function poissonPrediction(trainingMatches, target) {
       awayDefense.defense +
       CONFIG.homeAdvantageGoals
   );
+
   const awayLambda = Math.max(
     0.1,
     league.away *
       awayAttack.attack *
       homeDefense.defense
   );
+
   return {
-    homeLambda,
-    awayLambda,
     homeProbabilities: poissonDistribution(
       homeLambda,
       CONFIG.poissonMaximumGoals
     ),
+
     awayProbabilities: poissonDistribution(
       awayLambda,
       CONFIG.poissonMaximumGoals
     )
   };
 }
+
+function outcomeProbabilities(prediction) {
+  let home = 0;
+  let draw = 0;
+  let away = 0;
+
+  for (let h = 0; h < prediction.homeProbabilities.length; h++) {
+    for (let a = 0; a < prediction.awayProbabilities.length; a++) {
+      const probability =
+        prediction.homeProbabilities[h] *
+        prediction.awayProbabilities[a];
+
+      if (h > a) {
+        home += probability;
+      } else if (h < a) {
+        away += probability;
+      } else {
+        draw += probability;
+      }
+    }
+  }
+
+  const total = home + draw + away;
+
+  return {
+    H: home / total,
+    D: draw / total,
+    A: away / total
+  };
+}
+
 function getElo(ratings, team) {
-  if (!(team in ratings)) {
-    ratings[team] = CONFIG.initialElo;
-  }
-  return ratings[team];
+  return team in ratings
+    ? ratings[team]
+    : CONFIG.initialElo;
 }
-function updateElo(ratings, match) {
-  const home = getElo(ratings, match.homeTeam);
-  const away = getElo(ratings, match.awayTeam);
-  const expectedHome =
-    1 /
-    (1 +
-      Math.pow(
-        10,
-        (away - (home + CONFIG.homeAdvantageElo)) / 400
-      ));
-  const expectedAway = 1 - expectedHome;
-  let actualHome;
-  if (match.homeGoals > match.awayGoals) {
-    actualHome = 1;
-  } else if (match.homeGoals < match.awayGoals) {
-    actualHome = 0;
-  } else {
-    actualHome = 0.5;
-  }
-  const actualAway = 1 - actualHome;
-  // A modest margin-of-victory adjustment.
-  const goalDifference = Math.abs(
-    match.homeGoals - match.awayGoals
-  );
-  const marginMultiplier =
-    goalDifference > 1
-      ? Math.log(goalDifference + 1) * 2.2 /
-        (0.001 * Math.abs(home - away) + 2.2)
-      : 1;
-  ratings[match.homeTeam] =
-    home +
-    CONFIG.eloK *
-      marginMultiplier *
-      (actualHome - expectedHome);
-  ratings[match.awayTeam] =
-    away +
-    CONFIG.eloK *
-      marginMultiplier *
-      (actualAway - expectedAway);
-}
-function eloPrediction(ratings, target, trainingMatches) {
+
+function eloPrediction(ratings, target, matches) {
   const homeRating = getElo(ratings, target.homeTeam);
   const awayRating = getElo(ratings, target.awayTeam);
-  // Estimate the relative strength of the home team.
+
   const homeStrength =
     1 /
-    (1 +
+    (
+      1 +
       Math.pow(
         10,
-        (awayRating -
-          (homeRating + CONFIG.homeAdvantageElo)) / 400
-      ));
-  // Estimate the draw rate using historical matches only.
+        (
+          awayRating -
+          (homeRating + CONFIG.homeAdvantageElo)
+        ) / 400
+      )
+    );
+
   let draws = 0;
-  for (const match of trainingMatches) {
+
+  for (const match of matches) {
     if (match.homeGoals === match.awayGoals) {
       draws++;
     }
   }
-  // Smooth the draw estimate to avoid extreme probabilities.
+
   const drawProbability =
-    (draws + 1) / (trainingMatches.length + 4);
-  // Divide the remaining probability between home and away wins.
+    (draws + 1) / (matches.length + 4);
+
   const decisiveProbability = 1 - drawProbability;
+
   return {
-    home: decisiveProbability * homeStrength,
-    draw: drawProbability,
-    away: decisiveProbability * (1 - homeStrength)
+    H: decisiveProbability * homeStrength,
+    D: drawProbability,
+    A: decisiveProbability * (1 - homeStrength)
   };
 }
+
+function updateEloGroup(ratings, group) {
+  /*
+   * All predictions for the date must happen before this function.
+   * Every match update uses the ratings snapshot from the start
+   * of the date, avoiding match-order influence within that date.
+   */
+  const changes = {};
+
+  function rating(team) {
+    return team in ratings
+      ? ratings[team]
+      : CONFIG.initialElo;
+  }
+
+  function addChange(team, change) {
+    changes[team] = (changes[team] || 0) + change;
+  }
+
+  for (const match of group) {
+    const home = rating(match.homeTeam);
+    const away = rating(match.awayTeam);
+
+    const expectedHome =
+      1 /
+      (
+        1 +
+        Math.pow(
+          10,
+          (away - (home + CONFIG.homeAdvantageElo)) / 400
+        )
+      );
+
+    const actualHome =
+      match.homeGoals > match.awayGoals ? 1 :
+      match.homeGoals < match.awayGoals ? 0 : 0.5;
+
+    const difference = Math.abs(home - away);
+    const goalDifference = Math.abs(
+      match.homeGoals - match.awayGoals
+    );
+
+    const marginMultiplier =
+      goalDifference > 1
+        ? Math.log(goalDifference + 1) * 2.2 /
+          (0.001 * difference + 2.2)
+        : 1;
+
+    const change =
+      CONFIG.eloK *
+      marginMultiplier *
+      (actualHome - expectedHome);
+
+    addChange(match.homeTeam, change);
+    addChange(match.awayTeam, -change);
+  }
+
+  for (const [team, change] of Object.entries(changes)) {
+    ratings[team] = rating(team) + change;
+  }
+}
+
+function hybridPrediction(poisson, elo) {
+  const pWeight = CONFIG.hybridPoissonWeight;
+  const eWeight = CONFIG.hybridEloWeight;
+
+  const combined = {};
+
+  for (const outcome of OUTCOMES) {
+    combined[outcome] =
+      pWeight * poisson[outcome] +
+      eWeight * elo[outcome];
+  }
+
+  const total = OUTCOMES.reduce(
+    (sum, outcome) => sum + combined[outcome],
+    0
+  );
+
+  for (const outcome of OUTCOMES) {
+    combined[outcome] /= total;
+  }
+
+  return combined;
+}
+
 function outcomeFromScores(homeGoals, awayGoals) {
   if (homeGoals > awayGoals) return "H";
   if (homeGoals < awayGoals) return "A";
   return "D";
 }
-function outcomeProbabilities(prediction) {
-  let home = 0;
-  let draw = 0;
-  let away = 0;
-  for (
-    let h = 0;
-    h < prediction.homeProbabilities.length;
-    h++
-  ) {
-    for (
-      let a = 0;
-      a < prediction.awayProbabilities.length;
-      a++
-    ) {
-      const probability =
-        prediction.homeProbabilities[h] *
-        prediction.awayProbabilities[a];
-      if (h > a) home += probability;
-      else if (h < a) away += probability;
-      else draw += probability;
-    }
-  }
-  const total = home + draw + away;
-  return {
-    home: home / total,
-    draw: draw / total,
-    away: away / total
-  };
-}
-function hybridPrediction(poisson, elo) {
-  const poissonOutcomes = outcomeProbabilities(poisson);
-  const pWeight = CONFIG.hybridPoissonWeight;
-  const eWeight = CONFIG.hybridEloWeight;
-  const combined = {
-    home:
-      pWeight * poissonOutcomes.home +
-      eWeight * elo.home,
-    draw:
-      pWeight * poissonOutcomes.draw +
-      eWeight * elo.draw,
-    away:
-      pWeight * poissonOutcomes.away +
-      eWeight * elo.away
-  };
-  const total = combined.home + combined.draw + combined.away;
-  return {
-    home: combined.home / total,
-    draw: combined.draw / total,
-    away: combined.away / total
-  };
-}
-function brierScore(probabilities, actual) {
-  const actualValues = {
-    home: actual === "H" ? 1 : 0,
-    draw: actual === "D" ? 1 : 0,
-    away: actual === "A" ? 1 : 0
-  };
-  return (
-    Math.pow(probabilities.home - actualValues.home, 2) +
-    Math.pow(probabilities.draw - actualValues.draw, 2) +
-    Math.pow(probabilities.away - actualValues.away, 2)
-  ) / 3;
-}
-function logLoss(probabilities, actual) {
-  const chosen =
-    actual === "H"
-      ? probabilities.home
-      : actual === "D"
-      ? probabilities.draw
-      : probabilities.away;
-  return -Math.log(Math.max(chosen, 1e-15));
-}
+
 function createMetrics() {
   return {
     correct: 0,
     brierTotal: 0,
     logLossTotal: 0,
-    matches: 0
+    matches: 0,
+    calibration: {
+      H: [],
+      D: [],
+      A: []
+    }
   };
 }
-function addResult(metrics, prediction, actual, label = "Model") {
-  const probabilities = [
-    prediction.home,
-    prediction.draw,
-    prediction.away
-  ];
 
-  if (
-    probabilities.some(
-      p => !Number.isFinite(p) || p < 0 || p > 1
-    )
-  ) {
-    throw new Error(
-      `${label} produced an invalid probability.`
-    );
-  }
-
-  const total = probabilities.reduce(
-    (sum, p) => sum + p,
+function addResult(metrics, prediction, actual) {
+  const total = OUTCOMES.reduce(
+    (sum, outcome) => sum + prediction[outcome],
     0
   );
 
-  if (Math.abs(total - 1) > 1e-8) {
-    throw new Error(
-      `${label} probabilities do not add up to 1.`
-    );
+  if (
+    OUTCOMES.some(outcome => {
+      const probability = prediction[outcome];
+
+      return (
+        !Number.isFinite(probability) ||
+        probability < 0 ||
+        probability > 1
+      );
+    }) ||
+    Math.abs(total - 1) > 1e-8
+  ) {
+    throw new Error("A model produced invalid probabilities.");
   }
 
-  const choices = [
-    ["H", prediction.home],
-    ["D", prediction.draw],
-    ["A", prediction.away]
-  ];
+  const predictedOutcome = OUTCOMES.reduce(
+    (best, outcome) =>
+      prediction[outcome] > prediction[best] ? outcome : best,
+    "H"
+  );
 
-  choices.sort((a, b) => b[1] - a[1]);
-
-  if (choices[0][0] === actual) {
+  if (predictedOutcome === actual) {
     metrics.correct++;
   }
 
-  metrics.brierTotal += brierScore(prediction, actual);
-  metrics.logLossTotal += logLoss(prediction, actual);
+  let brier = 0;
+
+  for (const outcome of OUTCOMES) {
+    const observed = outcome === actual ? 1 : 0;
+    const probability = prediction[outcome];
+
+    brier += Math.pow(probability - observed, 2);
+
+    metrics.calibration[outcome].push({
+      predicted: probability,
+      observed
+    });
+  }
+
+  // Multiclass Brier score is divided by the three outcomes.
+  metrics.brierTotal += brier / 3;
+
+  metrics.logLossTotal += -Math.log(
+    Math.max(prediction[actual], 1e-15)
+  );
+
   metrics.matches++;
 }
+
 function formatMetrics(name, metrics) {
-  if (!metrics.matches) {
-    return {
-      model: name,
-      matches: 0,
-      accuracy: "N/A",
-      brierScore: "N/A",
-      logLoss: "N/A"
-    };
-  }
   return {
-    model: name,
-    matches: metrics.matches,
-    accuracy:
-      ((metrics.correct / metrics.matches) * 100).toFixed(2) + "%",
-    brierScore:
-      (metrics.brierTotal / metrics.matches).toFixed(4),
-    logLoss:
-      (metrics.logLossTotal / metrics.matches).toFixed(4)
+    Model: name,
+    Matches: metrics.matches,
+    Accuracy: metrics.matches
+      ? `${(100 * metrics.correct / metrics.matches).toFixed(2)}%`
+      : "N/A",
+    "Brier Score": metrics.matches
+      ? (metrics.brierTotal / metrics.matches).toFixed(4)
+      : "N/A",
+    "Log Loss": metrics.matches
+      ? (metrics.logLossTotal / metrics.matches).toFixed(4)
+      : "N/A"
   };
 }
+
+function evaluateDateGroup(group, priorMatches, ratings, metrics) {
+  /*
+   * No match on this date is added to the history until all
+   * predictions for the date have been generated.
+   */
+  for (const match of group) {
+    const poisson = outcomeProbabilities(
+      poissonPrediction(priorMatches, match)
+    );
+
+    const elo = eloPrediction(ratings, match, priorMatches);
+
+    const hybrid = hybridPrediction(poisson, elo);
+
+    const actual = outcomeFromScores(
+      match.homeGoals,
+      match.awayGoals
+    );
+
+    addResult(metrics.Poisson, poisson, actual);
+    addResult(metrics.Elo, elo, actual);
+    addResult(metrics.Hybrid, hybrid, actual);
+  }
+
+  updateEloGroup(ratings, group);
+}
+
 function runBacktest(matches) {
-  if (
-    matches.length <
-    CONFIG.minimumTrainingMatches + 1
-  ) {
+  if (matches.length <= CONFIG.minimumTrainingMatches) {
     throw new Error(
-      `At least ${CONFIG.minimumTrainingMatches + 1} matches are required. ` +
-      `Found ${matches.length}.`
+      `At least ${CONFIG.minimumTrainingMatches + 1} matches are required.`
     );
   }
 
-  // Keep matches played on the same date in the same group.
+  /*
+   * Select a cutoff after the minimum number of matches.
+   * All matches on the cutoff date remain in training so that
+   * no date is split between training and testing.
+   */
   const cutoffDate =
     matches[CONFIG.minimumTrainingMatches - 1].date;
 
@@ -602,16 +670,9 @@ function runBacktest(matches) {
     match => match.date > cutoffDate
   );
 
-  if (
-    trainingMatches.length < CONFIG.minimumTrainingMatches ||
-    testMatches.length === 0
-  ) {
-    throw new Error(
-      "Could not create a chronological train/test split."
-    );
+  if (testMatches.length === 0) {
+    throw new Error("No test matches remain after the training cutoff.");
   }
-
-  const ratings = {};
 
   const metrics = {
     Poisson: createMetrics(),
@@ -619,144 +680,173 @@ function runBacktest(matches) {
     Hybrid: createMetrics()
   };
 
-  // Initialize Elo using training matches only.
+  const ratings = {};
+
+  // Train Elo in chronological date groups.
+  const trainingByDate = new Map();
+
   for (const match of trainingMatches) {
-    updateElo(ratings, match);
-  }
-
-  let dateGroup = [];
-
-  function evaluateDateGroup(group) {
-    if (group.length === 0) return;
-
-    const matchDate = group[0].date;
-
-    // Only use matches from earlier dates.
-    const priorMatches = matches.filter(
-      match => match.date < matchDate
-    );
-
-    // Predict every match on this date before updating Elo.
-    for (const match of group) {
-      const poisson = poissonPrediction(
-        priorMatches,
-        match
-      );
-
-      const poissonOutcomes =
-        outcomeProbabilities(poisson);
-
-      const elo = eloPrediction(
-        ratings,
-        match,
-        priorMatches
-      );
-
-      const hybrid = hybridPrediction(
-        poisson,
-        elo
-      );
-
-      const actual = outcomeFromScores(
-        match.homeGoals,
-        match.awayGoals
-      );
-
-      addResult(
-        metrics.Poisson,
-        poissonOutcomes,
-        actual,
-        "Poisson"
-      );
-
-      addResult(
-        metrics.Elo,
-        elo,
-        actual,
-        "Elo"
-      );
-
-      addResult(
-        metrics.Hybrid,
-        hybrid,
-        actual,
-        "Hybrid"
-      );
+    if (!trainingByDate.has(match.date)) {
+      trainingByDate.set(match.date, []);
     }
 
-    // Update Elo only after all predictions for this date.
-    for (const match of group) {
-      updateElo(ratings, match);
-    }
+    trainingByDate.get(match.date).push(match);
   }
 
-  let currentDate = null;
+  for (const group of trainingByDate.values()) {
+    updateEloGroup(ratings, group);
+  }
+
+  const testByDate = new Map();
 
   for (const match of testMatches) {
-    if (
-      currentDate !== null &&
-      match.date !== currentDate
-    ) {
-      evaluateDateGroup(dateGroup);
-      dateGroup = [];
+    if (!testByDate.has(match.date)) {
+      testByDate.set(match.date, []);
     }
 
-    dateGroup.push(match);
-    currentDate = match.date;
+    testByDate.get(match.date).push(match);
   }
 
-  evaluateDateGroup(dateGroup);
+  for (const [date, group] of testByDate) {
+    const priorMatches = matches.filter(
+      match => match.date < date
+    );
 
-  const results = [
-    formatMetrics("Poisson", metrics.Poisson),
-    formatMetrics("Elo", metrics.Elo),
-    formatMetrics("Hybrid", metrics.Hybrid)
-  ];
+    evaluateDateGroup(
+      group,
+      priorMatches,
+      ratings,
+      metrics
+    );
+  }
 
   return {
     totalMatches: matches.length,
     trainingMatches: trainingMatches.length,
     testedMatches: testMatches.length,
-    results
+    cutoffDate,
+    metrics
   };
 }
+
+function printCalibration(modelName, metrics) {
+  console.log(`\n${modelName} — Probability calibration`);
+  console.log(
+    "Outcome | Predicted range | Count | Avg predicted | Actual frequency"
+  );
+
+  for (const outcome of OUTCOMES) {
+    const observations = metrics.calibration[outcome];
+
+    for (let bin = 0; bin < CONFIG.calibrationBins; bin++) {
+      const lower = bin / CONFIG.calibrationBins;
+      const upper = (bin + 1) / CONFIG.calibrationBins;
+
+      const selected = observations.filter(item => {
+        if (bin === CONFIG.calibrationBins - 1) {
+          return item.predicted >= lower && item.predicted <= upper;
+        }
+
+        return item.predicted >= lower && item.predicted < upper;
+      });
+
+      if (selected.length === 0) continue;
+
+      const averagePredicted =
+        selected.reduce((sum, item) => sum + item.predicted, 0) /
+        selected.length;
+
+      const actualFrequency =
+        selected.reduce((sum, item) => sum + item.observed, 0) /
+        selected.length;
+
+      console.log(
+        `${outcome.padEnd(7)} | ` +
+        `${(lower * 100).toFixed(0).padStart(2)}–${(upper * 100).toFixed(0)}%`.padEnd(16) +
+        ` | ${String(selected.length).padStart(5)} | ` +
+        `${(averagePredicted * 100).toFixed(2).padStart(12)}% | ` +
+        `${(actualFrequency * 100).toFixed(2).padStart(16)}%`
+      );
+    }
+  }
+}
+
 function main() {
-  const input = process.argv[2];
-  if (!input) {
+  const inputFiles = process.argv.slice(2);
+
+  if (inputFiles.length === 0) {
     console.log(`
-GoalMind AI — Offline Model Backtesting
+GoalMind AI — Historical Model Backtesting
+
 Usage:
-  node tools/model-backtest.js path/to/matches.json
-  node tools/model-backtest.js path/to/matches.csv
-Required data:
-  date, homeTeam, awayTeam, homeGoals, awayGoals
-This script does not connect to Appwrite or modify your live site.
+  node tools/model-backtest.js season.csv
+
+Combined chronological evaluation:
+  node tools/model-backtest.js season1.csv season2.csv season3.csv season4.csv
+
+Supported CSV headers:
+  Date,HomeTeam,AwayTeam,FTHG,FTAG
+
+Also supports JSON arrays with date, homeTeam, awayTeam,
+homeGoals and awayGoals.
+
+This tool does not connect to Appwrite or change live predictions.
 `);
     return;
   }
-  const matches = loadMatches(input);
+
+  const matches = loadMatches(inputFiles);
   const report = runBacktest(matches);
-  console.log("\n======================================");
+
+  console.log("\n==========================================");
   console.log("       GOALMIND AI BACKTEST REPORT");
-  console.log("======================================");
+  console.log("==========================================");
+  console.log(`Datasets:           ${inputFiles.length}`);
   console.log(`Historical matches: ${report.totalMatches}`);
-  console.log(`Initial training:   ${report.trainingMatches}`);
+  console.log(`Training matches:   ${report.trainingMatches}`);
   console.log(`Matches evaluated:  ${report.testedMatches}`);
-  console.log("\nRESULTS");
-  console.table(report.results);
-  const best = [...report.results]
-    .filter(row => row.matches > 0)
-    .sort((a, b) => Number(a.brierScore) - Number(b.brierScore))[0];
-  if (best) {
-    console.log(
-      `\nLowest Brier score: ${best.model}. ` +
-      "Lower is better for probabilistic forecasts."
-    );
-  }
+  console.log(`Training cutoff:    ${report.cutoffDate}`);
+
+  console.log("\nMODEL COMPARISON");
+  console.table([
+    formatMetrics("Poisson", report.metrics.Poisson),
+    formatMetrics("Elo", report.metrics.Elo),
+    formatMetrics("Hybrid", report.metrics.Hybrid)
+  ]);
+
+  const bestBrier = Object.entries(report.metrics)
+    .sort((a, b) =>
+      a[1].brierTotal / a[1].matches -
+      b[1].brierTotal / b[1].matches
+    )[0];
+
+  const bestLogLoss = Object.entries(report.metrics)
+    .sort((a, b) =>
+      a[1].logLossTotal / a[1].matches -
+      b[1].logLossTotal / b[1].matches
+    )[0];
+
   console.log(
-    "\nImportant: this is an initial baseline, not proof of predictive superiority."
+    `Lowest Brier score: ${bestBrier[0]} ` +
+    "(lower is better)."
+  );
+
+  console.log(
+    `Lowest log loss:    ${bestLogLoss[0]} ` +
+    "(lower is better)."
+  );
+
+  for (const modelName of ["Poisson", "Elo", "Hybrid"]) {
+    printCalibration(modelName, report.metrics[modelName]);
+  }
+
+  console.log(
+    "\nIMPORTANT: Calibration tables are diagnostics, not proof of " +
+    "future accuracy. Compare models on identical test matches, and " +
+    "do not treat this backtest as a guarantee of future performance."
   );
 }
+
 try {
   main();
 } catch (error) {
