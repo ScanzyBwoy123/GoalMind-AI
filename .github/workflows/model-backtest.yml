@@ -1,6 +1,9 @@
 name: GoalMind AI Model Backtest
 
 on:
+  push:
+    branches:
+      - goalmind-model-testing
   workflow_dispatch:
 
 permissions:
