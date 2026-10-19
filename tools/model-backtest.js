@@ -55,34 +55,95 @@ function number(value) {
   }
   return Number(value);
 }
+function normalizeDate(value) {
+  const raw = String(value || "").trim();
+
+  // Supports Football-Data dates such as 19/10/26.
+  const ukDate = raw.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/
+  );
+
+  if (ukDate) {
+    const day = Number(ukDate[1]);
+    const month = Number(ukDate[2]);
+    let year = Number(ukDate[3]);
+
+    if (year < 100) {
+      year += year >= 50 ? 1900 : 2000;
+    }
+
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+
+    if (
+      parsed.getUTCFullYear() !== year ||
+      parsed.getUTCMonth() !== month - 1 ||
+      parsed.getUTCDate() !== day
+    ) {
+      return null;
+    }
+
+    return parsed.toISOString();
+  }
+
+  const timestamp = Date.parse(raw);
+
+  return Number.isFinite(timestamp)
+    ? new Date(timestamp).toISOString()
+    : null;
+}
+
 function normalizeMatch(row, index) {
-  const date = row.date || row.match_date || row.matchDate;
+  const date =
+    row.date ||
+    row.match_date ||
+    row.matchDate ||
+    row.Date;
+
   const homeTeam =
-    row.homeTeam || row.home_team || row.home;
+    row.homeTeam ||
+    row.home_team ||
+    row.home ||
+    row.HomeTeam;
+
   const awayTeam =
-    row.awayTeam || row.away_team || row.away;
+    row.awayTeam ||
+    row.away_team ||
+    row.away ||
+    row.AwayTeam;
+
   const homeGoals = number(
-    row.homeGoals ?? row.home_goals ?? row.home_score
+    row.homeGoals ??
+    row.home_goals ??
+    row.home_score ??
+    row.FTHG
   );
+
   const awayGoals = number(
-    row.awayGoals ?? row.away_goals ?? row.away_score
+    row.awayGoals ??
+    row.away_goals ??
+    row.away_score ??
+    row.FTAG
   );
-  if (!date || !homeTeam || !awayTeam) {
+
+  const normalizedDate = normalizeDate(date);
+
+  if (!normalizedDate || !homeTeam || !awayTeam) {
     throw new Error(
-      `Match ${index + 1} is missing a date or team name.`
+      `Match ${index + 1} is missing a valid date or team name.`
     );
   }
+
   if (
-    !Number.isFinite(Date.parse(date)) ||
     !Number.isInteger(homeGoals) ||
     !Number.isInteger(awayGoals) ||
     homeGoals < 0 ||
     awayGoals < 0
   ) {
     throw new Error(
-      `Match ${index + 1} has an invalid date or score.`
+      `Match ${index + 1} has an invalid or missing score.`
     );
   }
+
   if (
     String(homeTeam).trim().toLowerCase() ===
     String(awayTeam).trim().toLowerCase()
@@ -91,8 +152,9 @@ function normalizeMatch(row, index) {
       `Match ${index + 1} has the same home and away team.`
     );
   }
+
   return {
-    date: new Date(date).toISOString(),
+    date: normalizedDate,
     homeTeam: String(homeTeam).trim(),
     awayTeam: String(awayTeam).trim(),
     homeGoals,
