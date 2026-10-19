@@ -399,32 +399,34 @@ function updateElo(ratings, match) {
       marginMultiplier *
       (actualAway - expectedAway);
 }
-function eloPrediction(ratings, target) {
-  const home = getElo(ratings, target.homeTeam);
-  const away = getElo(ratings, target.awayTeam);
-  const homeWin =
+function eloPrediction(ratings, target, trainingMatches) {
+  const homeRating = getElo(ratings, target.homeTeam);
+  const awayRating = getElo(ratings, target.awayTeam);
+  // Estimate the relative strength of the home team.
+  const homeStrength =
     1 /
     (1 +
       Math.pow(
         10,
-        (away - (home + CONFIG.homeAdvantageElo)) / 400
+        (awayRating -
+          (homeRating + CONFIG.homeAdvantageElo)) / 400
       ));
-  const awayWin =
-    1 /
-    (1 +
-      Math.pow(
-        10,
-        (home - (away - CONFIG.homeAdvantageElo)) / 400
-      ));
-  const draw = Math.max(
-    0,
-    1 - homeWin - awayWin
-  );
-  const total = homeWin + draw + awayWin;
+  // Estimate the draw rate using historical matches only.
+  let draws = 0;
+  for (const match of trainingMatches) {
+    if (match.homeGoals === match.awayGoals) {
+      draws++;
+    }
+  }
+  // Smooth the draw estimate to avoid extreme probabilities.
+  const drawProbability =
+    (draws + 1) / (trainingMatches.length + 4);
+  // Divide the remaining probability between home and away wins.
+  const decisiveProbability = 1 - drawProbability;
   return {
-    home: homeWin / total,
-    draw: draw / total,
-    away: awayWin / total
+    home: decisiveProbability * homeStrength,
+    draw: drawProbability,
+    away: decisiveProbability * (1 - homeStrength)
   };
 }
 function outcomeFromScores(homeGoals, awayGoals) {
@@ -512,16 +514,46 @@ function createMetrics() {
     matches: 0
   };
 }
-function addResult(metrics, prediction, actual) {
+function addResult(metrics, prediction, actual, label = "Model") {
+  const probabilities = [
+    prediction.home,
+    prediction.draw,
+    prediction.away
+  ];
+
+  if (
+    probabilities.some(
+      p => !Number.isFinite(p) || p < 0 || p > 1
+    )
+  ) {
+    throw new Error(
+      `${label} produced an invalid probability.`
+    );
+  }
+
+  const total = probabilities.reduce(
+    (sum, p) => sum + p,
+    0
+  );
+
+  if (Math.abs(total - 1) > 1e-8) {
+    throw new Error(
+      `${label} probabilities do not add up to 1.`
+    );
+  }
+
   const choices = [
     ["H", prediction.home],
     ["D", prediction.draw],
     ["A", prediction.away]
   ];
+
   choices.sort((a, b) => b[1] - a[1]);
+
   if (choices[0][0] === actual) {
     metrics.correct++;
   }
+
   metrics.brierTotal += brierScore(prediction, actual);
   metrics.logLossTotal += logLoss(prediction, actual);
   metrics.matches++;
@@ -548,48 +580,143 @@ function formatMetrics(name, metrics) {
   };
 }
 function runBacktest(matches) {
-  if (matches.length < CONFIG.minimumTrainingMatches + 1) {
+  if (
+    matches.length <
+    CONFIG.minimumTrainingMatches + 1
+  ) {
     throw new Error(
       `At least ${CONFIG.minimumTrainingMatches + 1} matches are required. ` +
       `Found ${matches.length}.`
     );
   }
+
+  // Keep matches played on the same date in the same group.
+  const cutoffDate =
+    matches[CONFIG.minimumTrainingMatches - 1].date;
+
+  const trainingMatches = matches.filter(
+    match => match.date <= cutoffDate
+  );
+
+  const testMatches = matches.filter(
+    match => match.date > cutoffDate
+  );
+
+  if (
+    trainingMatches.length < CONFIG.minimumTrainingMatches ||
+    testMatches.length === 0
+  ) {
+    throw new Error(
+      "Could not create a chronological train/test split."
+    );
+  }
+
   const ratings = {};
+
   const metrics = {
     Poisson: createMetrics(),
     Elo: createMetrics(),
     Hybrid: createMetrics()
   };
-  const firstTestIndex = CONFIG.minimumTrainingMatches;
-  for (let i = 0; i < matches.length; i++) {
-    const match = matches[i];
-    // Train Elo using only matches that occurred before this match.
-    // Update ratings after evaluating the match.
-    if (i >= firstTestIndex) {
-      const training = matches.slice(0, i);
-      const poisson = poissonPrediction(training, match);
-      const elo = eloPrediction(ratings, match);
-      const poissonOutcomes = outcomeProbabilities(poisson);
-      const hybrid = hybridPrediction(poisson, elo);
+
+  // Initialize Elo using training matches only.
+  for (const match of trainingMatches) {
+    updateElo(ratings, match);
+  }
+
+  let dateGroup = [];
+
+  function evaluateDateGroup(group) {
+    if (group.length === 0) return;
+
+    const matchDate = group[0].date;
+
+    // Only use matches from earlier dates.
+    const priorMatches = matches.filter(
+      match => match.date < matchDate
+    );
+
+    // Predict every match on this date before updating Elo.
+    for (const match of group) {
+      const poisson = poissonPrediction(
+        priorMatches,
+        match
+      );
+
+      const poissonOutcomes =
+        outcomeProbabilities(poisson);
+
+      const elo = eloPrediction(
+        ratings,
+        match,
+        priorMatches
+      );
+
+      const hybrid = hybridPrediction(
+        poisson,
+        elo
+      );
+
       const actual = outcomeFromScores(
         match.homeGoals,
         match.awayGoals
       );
-      addResult(metrics.Poisson, poissonOutcomes, actual);
-      addResult(metrics.Elo, elo, actual);
-      addResult(metrics.Hybrid, hybrid, actual);
+
+      addResult(
+        metrics.Poisson,
+        poissonOutcomes,
+        actual,
+        "Poisson"
+      );
+
+      addResult(
+        metrics.Elo,
+        elo,
+        actual,
+        "Elo"
+      );
+
+      addResult(
+        metrics.Hybrid,
+        hybrid,
+        actual,
+        "Hybrid"
+      );
     }
-    updateElo(ratings, match);
+
+    // Update Elo only after all predictions for this date.
+    for (const match of group) {
+      updateElo(ratings, match);
+    }
   }
+
+  let currentDate = null;
+
+  for (const match of testMatches) {
+    if (
+      currentDate !== null &&
+      match.date !== currentDate
+    ) {
+      evaluateDateGroup(dateGroup);
+      dateGroup = [];
+    }
+
+    dateGroup.push(match);
+    currentDate = match.date;
+  }
+
+  evaluateDateGroup(dateGroup);
+
   const results = [
     formatMetrics("Poisson", metrics.Poisson),
     formatMetrics("Elo", metrics.Elo),
     formatMetrics("Hybrid", metrics.Hybrid)
   ];
+
   return {
     totalMatches: matches.length,
-    trainingMatches: firstTestIndex,
-    testedMatches: matches.length - firstTestIndex,
+    trainingMatches: trainingMatches.length,
+    testedMatches: testMatches.length,
     results
   };
 }
