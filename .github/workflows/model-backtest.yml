@@ -1,0 +1,33 @@
+name: GoalMind AI Model Backtest
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    name: Compare Poisson, Elo and Hybrid
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out testing branch
+        uses: actions/checkout@v4
+        with:
+          ref: goalmind-model-testing
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Download historical football results
+        run: |
+          set -e
+          curl --fail --location --retry 3 \
+            https://www.football-data.co.uk/mmz4281/2526/E0.csv \
+            --output premier-league-2025-26.csv
+
+      - name: Run model backtest
+        run: node tools/model-backtest.js premier-league-2025-26.csv
