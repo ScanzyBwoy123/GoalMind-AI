@@ -237,239 +237,142 @@
     </footer>
   </main>
   <script>
-    const form = document.getElementById("matchForm");
-const result = document.getElementById("result");
-const submitButton = form.querySelector('button[type="submit"]');
+    const form = document.getElementById(“matchForm”);
+const result = document.getElementById(“result”);
+const submitButton = form.querySelector(‘button[type=“submit”]’);
 
-const APPWRITE_PROJECT_ID = "6acba55b002fe04944f0";
-const FUNCTION_ID = "goalmind-predict";
+const SUPABASE_FUNCTION_URL = “https://dchmgbhywyvprnhcjuma.supabase.co/functions/v1/goalmind-predict”;
+const SUPABASE_PUBLISHABLE_KEY = “sb_publishable_Z7IAXc3Mcot4omAC6Al5EQ_7FR2vk99”;
 
-function addText(parent, tag, text, className = "") {
-  const element = document.createElement(tag);
-  element.textContent = text;
-
-  if (className) {
-    element.className = className;
-  }
-
-  parent.appendChild(element);
-  return element;
+function addText(parent, tag, text) {
+const el = document.createElement(tag);
+el.textContent = text;
+parent.appendChild(el);
+return el;
 }
 
-function formatPercent(value) {
-  return `${(Number(value) * 100).toFixed(1)}%`;
+function percent(value) {
+return (Number(value) * 100).toFixed(1) + “%”;
 }
 
-function displayPrediction(prediction) {
-  result.replaceChildren();
+function displayPrediction(p) {
+result.replaceChildren();
 
-  addText(
-    result,
-    "h3",
-    `${prediction.home_team} vs ${prediction.away_team}`
-  );
+addText(result, “h3”, p.homeTeam + “ vs “ + p.awayTeam);
+addText(result, “p”, “Competition: “ + p.competition);
+addText(result, “p”, “Match date: “ + p.matchDate);
+addText(
+result,
+“p”,
+“Expected score: “ +
+Number(p.expectedHomeGoals).toFixed(2) +
+“ - “ +
+Number(p.expectedAwayGoals).toFixed(2)
+);
 
-  addText(
-    result,
-    "p",
-    `Competition: ${prediction.league}`
-  );
+addText(result, “h4”, “Match outcome probabilities”);
 
-  addText(
-    result,
-    "p",
-    `Predicted score: ${prediction.predicted_score}`
-  );
+const outcomes = document.createElement(“ul”);
+addText(outcomes, “li”, “Home win: “ + percent(p.homeWinProbability));
+addText(outcomes, “li”, “Draw: “ + percent(p.drawProbability));
+addText(outcomes, “li”, “Away win: “ + percent(p.awayWinProbability));
+result.appendChild(outcomes);
 
-  addText(
-    result,
-    "p",
-    `Expected goals: ${prediction.predicted_home_goals} - ${prediction.predicted_away_goals}`
-  );
+addText(result, “h4”, “Goals analysis”);
 
-  addText(result, "h4", "Match Outcome Probabilities");
+const goals = document.createElement(“ul”);
+addText(goals, “li”, “Over 2.5 goals: “ + percent(p.over25Probability));
+addText(
+goals,
+“li”,
+“Both teams to score: “ + percent(p.bothTeamsToScoreProbability)
+);
+result.appendChild(goals);
 
-  const outcomes = document.createElement("ul");
+if (Array.isArray(p.predictedScorelines)) {
+addText(result, “h4”, “Most likely scorelines”);
 
-  addText(
-    outcomes,
-    "li",
-    `Home win: ${formatPercent(prediction.home_win_prob)}`
-  );
+const scores = document.createElement("ul");
+p.predictedScorelines.forEach(item => {
+  addText(scores, "li", item.score + " — " + percent(item.probability));
+});
+result.appendChild(scores);
 
-  addText(
-    outcomes,
-    "li",
-    `Draw: ${formatPercent(prediction.draw_prob)}`
-  );
-
-  addText(
-    outcomes,
-    "li",
-    `Away win: ${formatPercent(prediction.away_win_prob)}`
-  );
-
-  result.appendChild(outcomes);
-
-  addText(result, "h4", "Goals Analysis");
-
-  const goals = document.createElement("ul");
-
-  addText(
-    goals,
-    "li",
-    `Over 2.5 goals: ${formatPercent(prediction.over25_prob)}`
-  );
-
-  addText(
-    goals,
-    "li",
-    `Both teams to score: ${formatPercent(prediction.btts_prob)}`
-  );
-
-  result.appendChild(goals);
-
-  if (Array.isArray(prediction.top_scores)) {
-    addText(result, "h4", "Most Likely Scorelines");
-
-    const scores = document.createElement("ul");
-
-    prediction.top_scores.forEach(item => {
-      addText(
-        scores,
-        "li",
-        `${item.score} — ${item.probability}%`
-      );
-    });
-
-    result.appendChild(scores);
-  }
-
-  addText(
-    result,
-    "p",
-    `Historical matches analyzed: ${prediction.history_matches_used}`
-  );
-
-  addText(
-    result,
-    "p",
-    "Important: These are experimental statistical estimates, not guaranteed outcomes."
-  );
-
-  addText(
-    result,
-    "p",
-    "Data limitation: The current historical dataset covers EPL seasons from 2015–16 through 2024–25. It does not include newer seasons or current team news."
-  );
-
-  result.hidden = false;
 }
 
-form.addEventListener("submit", async function(event) {
-  event.preventDefault();
+addText(
+result,
+“p”,
+“Historical matches analyzed: “ + p.historicalMatchesUsed
+);
 
-  const home = document.getElementById("homeTeam").value.trim();
-  const away = document.getElementById("awayTeam").value.trim();
-  const date = document.getElementById("matchDate").value;
+addText(
+result,
+“p”,
+p.note || “These are statistical estimates, not guaranteed results.”
+);
 
-  if (!home || !away) {
-    alert("Please enter both team names.");
-    return;
-  }
+result.hidden = false;
+}
 
-  if (home.toLowerCase() === away.toLowerCase()) {
-    alert("Please enter two different teams.");
-    return;
-  }
+form.addEventListener(“submit”, async event => {
+event.preventDefault();
 
-  const payload = {
-    league: "English Premier League",
-    home_team: home,
-    away_team: away,
-    match_date: date
-      ? `${date}T12:00:00.000Z`
-      : new Date().toISOString()
-  };
+const home = document.getElementById(“homeTeam”).value.trim();
+const away = document.getElementById(“awayTeam”).value.trim();
+const date =
+document.getElementById(“matchDate”).value ||
+new Date().toISOString().slice(0, 10);
 
-  result.replaceChildren();
-  result.hidden = false;
+if (!home || !away) return;
 
-  addText(result, "p", "Analyzing historical football data. Please wait...");
+if (home.toLowerCase() === away.toLowerCase()) {
+result.replaceChildren();
+addText(result, “p”, “Please enter two different teams.”);
+result.hidden = false;
+return;
+}
 
-  submitButton.disabled = true;
-  submitButton.textContent = "Analyzing...";
+result.replaceChildren();
+addText(result, “p”, “Analyzing historical La Liga results…”);
+result.hidden = false;
 
-  try {
-    const response = await fetch(
-            `https://nyc.cloud.appwrite.io/v1/functions/${FUNCTION_ID}/executions`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Appwrite-Project": APPWRITE_PROJECT_ID
-        },
-        body: JSON.stringify({
-          body: JSON.stringify(payload),
-          async: false,
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          }
-        })
-      }
-    );
+submitButton.disabled = true;
+submitButton.textContent = “Analyzing…”;
 
-    const execution = await response.json();
+try {
+const response = await fetch(SUPABASE_FUNCTION_URL, {
+method: “POST”,
+headers: {
+“Content-Type”: “application/json”,
+“apikey”: SUPABASE_PUBLISHABLE_KEY
+},
+body: JSON.stringify({
+homeTeam: home,
+awayTeam: away,
+matchDate: date
+})
+});
 
-    if (!response.ok) {
-      throw new Error(
-        execution.message || "Unable to contact the prediction service."
-      );
-    }
+const data = await response.json();
+if (!response.ok || !data.success) {
+  throw new Error(data.error || "The prediction service returned an error.");
+}
+displayPrediction(data);
 
-    if (!execution.responseBody) {
-      throw new Error(
-        "The prediction service did not return a result. Please try again."
-      );
-    }
-
-    let prediction;
-
-    try {
-      prediction = JSON.parse(execution.responseBody);
-    } catch {
-      throw new Error("The prediction service returned an invalid response.");
-    }
-
-    if (
-      execution.responseStatusCode >= 400 ||
-      prediction.error
-    ) {
-      throw new Error(
-        prediction.error || "The prediction could not be completed."
-      );
-    }
-
-    displayPrediction(prediction);
-
-  } catch (error) {
-    result.replaceChildren();
-
-    addText(result, "strong", "Prediction unavailable");
-
-    addText(
-      result,
-      "p",
-      error.message || "Something went wrong. Please try again."
-    );
-
-    result.hidden = false;
-
-  } finally {
-    submitButton.disabled = false;
-    submitButton.textContent = "Prepare Match →";
-  }
+} catch (error) {
+result.replaceChildren();
+addText(result, “strong”, “Prediction unavailable”);
+addText(
+result,
+“p”,
+error.message || “Please try again shortly.”
+);
+result.hidden = false;
+} finally {
+submitButton.disabled = false;
+submitButton.textContent = “Analyze Match →”;
+}
 });
   </script>
 </body>
